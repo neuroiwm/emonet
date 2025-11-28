@@ -179,11 +179,11 @@ def make_visualization(
     )
     visualization[:, : frame_rgb.shape[1], :] = frame_rgb[:, :, ::-1].astype(np.uint8)
     visualization[
-        : frame_rgb.shape[0] // 2, frame_rgb.shape[1] :, :
+        : frame_rgb.shape[0] // 2, frame_rgb.shape[1]:, :
     ] = landmark_visualization[:, :, ::-1].astype(
         np.uint8
     )  # OpenCV needs BGR
-    visualization[frame_rgb.shape[0] // 2 :, frame_rgb.shape[1] :, :] = (
+    visualization[frame_rgb.shape[0] // 2:, frame_rgb.shape[1]:, :] = (
         circumplex_bgr.astype(np.uint8)
     )
 
@@ -221,6 +221,9 @@ if __name__ == "__main__":
     # Parameters of the experiments
     n_expression = args.nclasses
     device = "cuda:0"
+    # if no cuda
+    if not torch.cuda.is_available():
+        device = 'cpu'
     image_size = 256
     emotion_classes = {
         0: "Neutral",
@@ -253,11 +256,11 @@ if __name__ == "__main__":
             detected_faces = sfd_detector.detect_from_image(frame[:, :, ::-1])
 
         # If at least a face has been detected, run emotion recognition on the first face
-        if len(detected_faces)>0:
+        if len(detected_faces) > 0:
             # Only take the first detected face
             bbox = np.array(detected_faces[0]).astype(np.int32)
 
-            face_crop = frame[bbox[1] : bbox[3], bbox[0] : bbox[2], :]
+            face_crop = frame[bbox[1]: bbox[3], bbox[0]: bbox[2], :]
             emotion_prediction = run_emonet(emonet, face_crop.copy())
 
             visualization_bgr = make_visualization(
@@ -281,12 +284,48 @@ if __name__ == "__main__":
     if visualization_frames:
         save_path = Path(__file__).parent / args.output_path
 
+        # Use explicit fourcc code instead of -1
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+        # Get frame dimensions
+        height, width = visualization_frames[0].shape[:2]
+
         out = cv2.VideoWriter(
-            save_path,
-            -1,
+            str(save_path),
+            fourcc,
             24.0,
-            (visualization_frames[0].shape[1], visualization_frames[0].shape[0]),
+            (width, height)
         )
 
-        for frame in visualization_frames:
-            out.write(frame)
+        # Verify VideoWriter opened successfully
+        if not out.isOpened():
+            print(f"Error: VideoWriter failed to open for {save_path}")
+            print("Trying alternative codec...")
+            # Try alternative codec
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            out = cv2.VideoWriter(
+                str(save_path),
+                fourcc,
+                24.0,
+                (width, height)
+            )
+
+        print(f"VideoWriter opened: {out.isOpened()}")
+        print(f"Writing {len(visualization_frames)} frames to {save_path}")
+
+        # Write frames
+        for i, frame in enumerate(visualization_frames):
+            success = out.write(frame)
+            if not success:
+                print(f"Warning: Failed to write frame {i}")
+
+        # Critical: Release the VideoWriter to finalize the file
+        out.release()
+        print(f"Video saved to: {save_path}")
+
+        # Verify the file was created
+        if save_path.exists():
+            file_size = save_path.stat().st_size
+            print(f"Output file size: {file_size:,} bytes")
+        else:
+            print("Error: Output file was not created")
